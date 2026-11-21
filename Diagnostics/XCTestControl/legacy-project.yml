@@ -1,0 +1,26 @@
+name: TouchSynthesisRunner
+options:
+  deploymentTarget:
+    iOS: '16.0'
+settings:
+  base:
+    GENERATE_INFOPLIST_FILE: YES
+    SWIFT_VERSION: '5.0'
+targets:
+  TouchSynthesisRunnerTests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - Tests/LegacyRunnerTests.swift
+      - Tests/RunnerAutomation.swift
+      - ../../TouchSynthesis/App/LegacyRunnerLink.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.touchsynthesis.runner
+schemes:
+  TouchSynthesisRunner:
+    build:
+      targets:
+        TouchSynthesisRunnerTests: [test]
+    test:
+      targets: [TouchSynthesisRunnerTests]

@@ -1,0 +1,60 @@
+name: Build TouchSynthesis iOS 16 companion
+on:
+  push:
+    branches: [ci/ios16-legacy-runner]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: Diagnostics/XCTestControl
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Build the companion with Xcode 16.4
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen generate --spec legacy-project.yml
+          xcodebuild -project TouchSynthesisRunner.xcodeproj -scheme TouchSynthesisRunner \
+            -configuration Debug -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO build-for-testing
+      - name: Package the companion
+        run: |
+          set -euo pipefail
+          runner="$RUNNER_TEMP/derived/Build/Products/Debug-iphoneos/TouchSynthesisRunnerTests-Runner.app"
+          stage="$RUNNER_TEMP/package/Payload/TouchSynthesisRunnerTests-Runner.app"
+          mkdir -p "$RUNNER_TEMP/package/Payload" "$RUNNER_TEMP/artifacts"
+          ditto "$runner" "$stage"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string TouchSynthesis Runner' "$stage/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$stage/Info.plist"
+          python3 - "$stage" <<'PY'
+          from pathlib import Path
+          from shutil import rmtree
+          import sys
+
+          stage = Path(sys.argv[1])
+          for path in sorted(stage.rglob('*.dSYM'), key=lambda item: len(item.parts), reverse=True):
+              if path.is_dir():
+                  rmtree(path)
+          test_binary = stage / 'PlugIns/TouchSynthesisRunnerTests.xctest/TouchSynthesisRunnerTests'
+          if not test_binary.is_file():
+              raise SystemExit('Missing companion XCTest executable')
+          PY
+          cd "$RUNNER_TEMP/package"
+          ipa="$RUNNER_TEMP/artifacts/TouchSynthesis-Runner-iOS16.ipa"
+          /usr/bin/zip -qry "$ipa" Payload
+          /usr/bin/unzip -tq "$ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TouchSynthesis-Runner-iOS16
+          path: ${{ runner.temp }}/artifacts/*.ipa
+          if-no-files-found: error
+          retention-days: 7

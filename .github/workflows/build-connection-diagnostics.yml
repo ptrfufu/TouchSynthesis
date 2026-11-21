@@ -2,7 +2,7 @@ name: Build TouchSynthesis connection diagnostics IPA
 
 on:
   push:
-    branches: [ci/connection-diagnostics]
+    branches: [ci/connection-diagnostics, ci/ios16-legacy-runner]
   workflow_dispatch:
 
 permissions:
@@ -35,7 +35,11 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$app/Info.plist"
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSBonjourServices:0' "$app/Info.plist")" = '_touchsynth._tcp'
           /usr/bin/strings "$app/TouchSynthesis" > "$RUNNER_TEMP/app-strings.txt"
-          /usr/bin/grep -F 'Probe Lockdown TCP' "$RUNNER_TEMP/app-strings.txt"
+          if [ "$GITHUB_REF_NAME" = ci/ios16-legacy-runner ]; then
+            /usr/bin/grep -F 'Preparing the runner' "$RUNNER_TEMP/app-strings.txt"
+          else
+            /usr/bin/grep -F 'Probe Lockdown TCP' "$RUNNER_TEMP/app-strings.txt"
+          fi
           mkdir -p "$RUNNER_TEMP/package/Payload" "$RUNNER_TEMP/artifacts"
           ditto "$app" "$RUNNER_TEMP/package/Payload/TouchSynthesis.app"
           cd "$RUNNER_TEMP/package"

@@ -33,6 +33,14 @@ struct ContentView: View {
     @State private var touchDots: [CGPoint] = []
 
     var body: some View {
+        if ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 16 {
+            NavigationStack { LegacyRunnerControls() }
+        } else {
+            selfRunnerView
+        }
+    }
+
+    private var selfRunnerView: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
