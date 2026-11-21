@@ -33,20 +33,23 @@ jobs:
         run: |
           set -euo pipefail
           runner="$RUNNER_TEMP/derived/Build/Products/Debug-iphoneos/XCTestControlUITests-Runner.app"
-          plugin="$runner/PlugIns/XCTestControlUITests.xctest"
-          test -d "$plugin"
-          /usr/bin/codesign --force --sign - "$plugin"
-          /usr/bin/codesign --verify --strict --verbose=2 "$plugin"
+          test -d "$runner/PlugIns/XCTestControlUITests.xctest"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$runner/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$runner/Info.plist"
           mkdir -p "$RUNNER_TEMP/package/Payload" "$RUNNER_TEMP/artifacts"
           ditto "$runner" "$RUNNER_TEMP/package/Payload/XCTestControlUITests-Runner.app"
           cd "$RUNNER_TEMP/package"
-          /usr/bin/zip -qry "$RUNNER_TEMP/artifacts/XCTestControl-trollstore.ipa" Payload
-          /usr/bin/unzip -tq "$RUNNER_TEMP/artifacts/XCTestControl-trollstore.ipa"
+          ipa="$RUNNER_TEMP/artifacts/XCTestControl-ios16-no-dsym.ipa"
+          /usr/bin/zip -qry "$ipa" Payload -x '*.dSYM' '*.dSYM/*'
+          /usr/bin/unzip -tq "$ipa"
+          /usr/bin/unzip -Z1 "$ipa" | awk '
+            /(^|\/)XCTestControlUITests\.xctest\/XCTestControlUITests$/ { test_binary = 1 }
+            /(^|\/)[^/]+\.dSYM(\/|$)/ { debug_symbols = 1 }
+            END { exit !(test_binary && !debug_symbols) }
+          '
       - uses: actions/upload-artifact@v4
         with:
-          name: XCTestControl-trollstore
+          name: XCTestControl-ios16-no-dsym
           path: ${{ runner.temp }}/artifacts/*.ipa
           if-no-files-found: error
           retention-days: 7
