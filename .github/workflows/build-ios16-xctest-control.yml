@@ -37,16 +37,37 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$runner/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$runner/Info.plist"
           mkdir -p "$RUNNER_TEMP/package/Payload" "$RUNNER_TEMP/artifacts"
-          ditto "$runner" "$RUNNER_TEMP/package/Payload/XCTestControlUITests-Runner.app"
+          stage="$RUNNER_TEMP/package/Payload/XCTestControlUITests-Runner.app"
+          ditto "$runner" "$stage"
+          python3 - "$stage" <<'PY'
+          from pathlib import Path
+          from shutil import rmtree
+          import sys
+
+          staged_runner = Path(sys.argv[1])
+          debug_bundles = sorted(staged_runner.rglob('*.dSYM'), key=lambda path: len(path.parts), reverse=True)
+          for path in debug_bundles:
+              if path.is_dir():
+                  rmtree(path)
+          PY
           cd "$RUNNER_TEMP/package"
           ipa="$RUNNER_TEMP/artifacts/XCTestControl-ios16-no-dsym.ipa"
-          /usr/bin/zip -qry "$ipa" Payload -x '*.dSYM' '*.dSYM/*'
-          /usr/bin/unzip -tq "$ipa"
-          /usr/bin/unzip -Z1 "$ipa" | awk '
-            /(^|\/)XCTestControlUITests\.xctest\/XCTestControlUITests$/ { test_binary = 1 }
-            /(^|\/)[^/]+\.dSYM(\/|$)/ { debug_symbols = 1 }
-            END { exit !(test_binary && !debug_symbols) }
-          '
+          /usr/bin/zip -qry "$ipa" Payload
+          python3 - "$ipa" <<'PY'
+          from pathlib import PurePosixPath
+          from zipfile import ZipFile
+          import sys
+
+          with ZipFile(sys.argv[1]) as archive:
+              invalid_entry = archive.testzip()
+              if invalid_entry:
+                  raise SystemExit(f'Corrupt archive entry: {invalid_entry}')
+              names = archive.namelist()
+              if not any(name.endswith('/XCTestControlUITests.xctest/XCTestControlUITests') for name in names):
+                  raise SystemExit('Missing XCTest executable')
+              if any(part.endswith('.dSYM') for name in names for part in PurePosixPath(name).parts):
+                  raise SystemExit('The IPA contains a dSYM bundle')
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: XCTestControl-ios16-no-dsym
