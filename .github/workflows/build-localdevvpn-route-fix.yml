@@ -1,0 +1,54 @@
+name: Build LocalDevVPN route fix
+
+on:
+  push:
+    branches: [ci/localdevvpn-route-fix]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: jkcoxson/LocalDevVPN
+          ref: 17740a2dfb11cd19a55575aff9aecc74213a3b10
+          path: LocalDevVPN
+          persist-credentials: false
+      - name: Apply pinned route fix
+        working-directory: LocalDevVPN
+        run: git apply ../.github/localdevvpn-route-fix.patch
+      - name: Build unsigned iPhone app and extension
+        working-directory: LocalDevVPN
+        run: |
+          xcodebuild -project LocalDevVPN.xcodeproj -scheme LocalDevVPN \
+            -configuration Debug -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/LocalDevVPN-build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build
+      - name: Package IPA with entitlement metadata
+        run: |
+          brew install ldid
+          mkdir Payload
+          ditto "$RUNNER_TEMP/LocalDevVPN-build/Build/Products/Debug-iphoneos/LocalDevVPN.app" Payload/LocalDevVPN.app
+          app=Payload/LocalDevVPN.app
+          provider="$app/PlugIns/TunnelProv.appex/TunnelProv"
+          test -f "$provider"
+          ldid -SLocalDevVPN/TunnelProv/TunnelProv.entitlements "$provider"
+          ldid -SLocalDevVPN/LocalDevVPN/LocalDevVPN.entitlements "$app/LocalDevVPN"
+          ldid -e "$provider" | grep -F packet-tunnel-provider
+          ldid -e "$app/LocalDevVPN" | grep -F packet-tunnel-provider
+          cp LocalDevVPN/LICENSE LocalDevVPN-LICENSE.txt
+          zip -q -r LocalDevVPN-route-fix-debug.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LocalDevVPN-route-fix-debug
+          path: |
+            LocalDevVPN-route-fix-debug.ipa
+            LocalDevVPN-LICENSE.txt
+          if-no-files-found: error
+          retention-days: 7

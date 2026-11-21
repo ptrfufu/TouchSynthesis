@@ -1,0 +1,17 @@
+--- a/TunnelProv/PacketTunnelProvider.swift
++++ b/TunnelProv/PacketTunnelProvider.swift
+@@ -59,11 +59,9 @@
+         ifaceIPv4.includedRoutes = tunnelDestinationIPv4Routes
+         ifaceIPv4.excludedRoutes = [.default()]
+ 
+-        // Tunneling config
+-        let settings = NEPacketTunnelNetworkSettings(
+-            // NOTE: 'tunnelRemoteAddress' is just for UI concerns and is not involved in routing
+-            tunnelRemoteAddress: peerEndpoint.ip
+-        )   
++        // iOS excludes the tunnel server address from the tunnel. Use a
++        // documentation-only address distinct from the local loopback route.
++        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "192.0.2.1")
+         settings.ipv4Settings = ifaceIPv4
+         
+         tunnelLog("Calling setTunnelNetworkSettings...")
