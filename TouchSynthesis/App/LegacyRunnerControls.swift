@@ -24,20 +24,24 @@ final class LegacyRunnerSession: ObservableObject {
             status = "Preparing the runner…"
             screenshot = nil
             listener.stateUpdateHandler = { [weak self, weak listener] state in
-                guard let self, let listener, self.listener === listener else { return }
-                switch state {
-                case .ready:
-                    self.status = "Now open TouchSynthesis Runner from TrollStore."
-                case .failed(let error): self.finish(error.localizedDescription)
-                default: break
+                Task { @MainActor in
+                    guard let self, let listener, self.listener === listener else { return }
+                    switch state {
+                    case .ready:
+                        self.status = "Now open TouchSynthesis Runner from TrollStore."
+                    case .failed(let error): self.finish(error.localizedDescription)
+                    default: break
+                    }
                 }
             }
             listener.newConnectionHandler = { [weak self, weak listener] connection in
-                guard let self, let listener, self.listener === listener, self.connection == nil else {
-                    connection.cancel()
-                    return
+                Task { @MainActor in
+                    guard let self, let listener, self.listener === listener, self.connection == nil else {
+                        connection.cancel()
+                        return
+                    }
+                    self.accept(connection, job: job)
                 }
-                self.accept(connection, job: job)
             }
             backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "TouchSynthesisRunner") { [weak self] in
                 Task { @MainActor in self?.finish("iOS ended the background session. Run the job again.") }
@@ -58,15 +62,27 @@ final class LegacyRunnerSession: ObservableObject {
     private func accept(_ connection: NWConnection, job: LegacyRunnerJob) {
         self.connection = connection
         connection.stateUpdateHandler = { [weak self, weak connection] state in
-            guard let self, let connection, self.connection === connection else { return }
-            switch state {
-            case .ready:
-                self.status = "Runner connected. Waiting for the result…"
-                LegacyRunnerLink.send(job, over: connection, limit: LegacyRunnerLink.maxJobSize) { error in
-                    guard self.connection === connection else { return }
-                    if let error { self.finish(error.localizedDescription); return }
-                    LegacyRunnerLink.receive(LegacyRunnerResult.self, over: connection, limit: LegacyRunnerLink.maxResultSize) { result in
-                        guard self.connection === connection else { return }
+            Task { @MainActor in
+                guard let self, let connection, self.connection === connection else { return }
+                switch state {
+                case .ready: self.exchange(job, over: connection)
+                case .failed(let error): self.finish(error.localizedDescription)
+                default: break
+                }
+            }
+        }
+        connection.start(queue: .main)
+    }
+
+    private func exchange(_ job: LegacyRunnerJob, over connection: NWConnection) {
+        status = "Runner connected. Waiting for the result…"
+        LegacyRunnerLink.send(job, over: connection, limit: LegacyRunnerLink.maxJobSize) { [weak self] error in
+            Task { @MainActor in
+                guard let self, self.connection === connection else { return }
+                if let error { self.finish(error.localizedDescription); return }
+                LegacyRunnerLink.receive(LegacyRunnerResult.self, over: connection, limit: LegacyRunnerLink.maxResultSize) { [weak self] result in
+                    Task { @MainActor in
+                        guard let self, self.connection === connection else { return }
                         switch result {
                         case .success(let reply):
                             self.screenshot = reply.png.flatMap { UIImage(data: $0) }
@@ -75,11 +91,8 @@ final class LegacyRunnerSession: ObservableObject {
                         }
                     }
                 }
-            case .failed(let error): self.finish(error.localizedDescription)
-            default: break
             }
         }
-        connection.start(queue: .main)
     }
 
     private func finish(_ message: String) {
