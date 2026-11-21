@@ -482,6 +482,16 @@ struct ContentView: View {
 
     // MARK: - Start Everything
 
+    private nonisolated static func openLockdownSession(_ record: PairingRecord) async throws -> (LockdownClient, String, String) {
+        try await Task.detached(priority: .userInitiated) {
+            let client = LockdownClient(pairingRecord: record)
+            try client.connect()
+            let type = try client.queryType()
+            let sessionID = try client.startSession()
+            return (client, type, sessionID)
+        }.value
+    }
+
     private func startEverything() async {
         isWorking = true
         defer { isWorking = false }
@@ -496,15 +506,10 @@ struct ContentView: View {
         logger.log("Starting full handshake...", phase: "P1")
 
         do {
-            let client = LockdownClient(pairingRecord: record)
-            try client.connect()
+            let (client, type, sid) = try await Self.openLockdownSession(record)
             lockdownClient = client
             logger.log("TCP connected", phase: "P1", level: .success)
-
-            let type = try client.queryType()
             logger.log("QueryType: \(type)", phase: "P1", level: .success)
-
-            let sid = try client.startSession()
             logger.log("Session started (ID: \(sid))", phase: "P1", level: .success)
             logger.log("TLS active: \(client.isTLSActive)", phase: "P1",
                        level: client.isTLSActive ? .success : .warning)
@@ -558,12 +563,7 @@ struct ContentView: View {
         logger.log("Starting self-runner mode...", phase: "RUNNER", level: .info)
 
         do {
-            let lockdown = LockdownClient(pairingRecord: record)
-            try lockdown.connect()
-            logger.log("Lockdown TCP connected (for testmanagerd)", phase: "RUNNER", level: .success)
-
-            let _ = try lockdown.queryType()
-            let sid = try lockdown.startSession()
+            let (lockdown, _, sid) = try await Self.openLockdownSession(record)
             logger.log("Lockdown session: \(sid)", phase: "RUNNER", level: .success)
 
             let tm = TestManagerClient(lockdown: lockdown, tunnel: ideviceTunnel, logger: logger)

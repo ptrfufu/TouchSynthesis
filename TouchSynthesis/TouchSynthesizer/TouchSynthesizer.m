@@ -249,11 +249,11 @@ static void _installGlobalExceptionHandler(void) {
 
     sFrameworkLoaded = YES;
 
-    // Dump all available XCTest methods for diagnostics
-    [self _dumpXCTestDiagnostics];
-
-    // Disable quiescence waiting — prevents testmanagerd from polling our process
-    [self _disableQuiescenceWaiting];
+    if (@available(iOS 26.0, *)) {
+        // These diagnostics and optimizations can open a runner connection.
+        [self _dumpXCTestDiagnostics];
+        [self _disableQuiescenceWaiting];
+    }
 
     return nil;
 }
@@ -553,6 +553,7 @@ static void _installGlobalExceptionHandler(void) {
     NSLog(@"[TouchSynthesizer] Enabling automation mode (minimal)...");
 
     id session = nil;
+    NSLog(@"[TouchSynthesizer] Opening shared XCTest session");
     @try {
         session = [cls_XCTRunnerDaemonSession performSelector:@selector(sharedSession)];
     } @catch (NSException *e) {
@@ -587,6 +588,13 @@ static void _installGlobalExceptionHandler(void) {
         } else {
             [results appendString:@"enableAutomationModeWithError: not available\n"];
         }
+    }
+
+    if (@available(iOS 26.0, *)) {
+        // Keep the existing post-enable diagnostic on the newer runner.
+    } else {
+        completion(results);
+        return;
     }
 
     // Brief wait for the automation overlay to stabilize, then test synthesis
