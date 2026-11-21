@@ -530,6 +530,9 @@ struct ContentView: View {
             logger.log("Self-runner mode active!", phase: "RUNNER", level: .success)
 
         } catch {
+            testManager?.disconnect()
+            testManager = nil
+            selfRunner = nil
             status = "Self-runner failed: \(error.localizedDescription)"
             logger.log("Self-runner failed: \(error.localizedDescription)", phase: "RUNNER", level: .error)
             return

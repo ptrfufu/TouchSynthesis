@@ -20,6 +20,11 @@ enum DTXAuxiliary {
     /// Entry separator value (0x0A) that prefixes each auxiliary entry
     static let entrySeparator: UInt32 = 0x0a
 
+    /// Forces object encoding for selectors that expect NSNumber.
+    struct ArchivedNumber {
+        let value: NSNumber
+    }
+
     // MARK: - Encode
 
     static func encode(objects: [Any]) throws -> Data {
@@ -53,8 +58,9 @@ enum DTXAuxiliary {
 
             default:
                 // Anything else: NSKeyedArchiver encode → type 0x02 (byte array)
+                let value: Any = (obj as? ArchivedNumber).map { $0.value as Any } ?? obj
                 let archived = try NSKeyedArchiver.archivedData(
-                    withRootObject: obj, requiringSecureCoding: false)
+                    withRootObject: value, requiringSecureCoding: false)
                 entries.appendLE(UInt32(0x02))                  // type: archived/array
                 entries.appendLE(UInt32(archived.count))        // length prefix
                 entries.append(archived)                        // data bytes

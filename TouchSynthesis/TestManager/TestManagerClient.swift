@@ -166,6 +166,50 @@ class TestManagerClient {
 
     // MARK: - Session Management
 
+    /// iOS 16's test manager uses versioned IDE calls and explicit process authorization.
+    func prepareIOS16Session(pid: Int32) async throws {
+        guard let testChannel = daemonChannel1, let controlChannel = daemonChannel2 else {
+            throw TestManagerError.notConnected
+        }
+
+        let protocolVersion = DTXAuxiliary.ArchivedNumber(value: NSNumber(value: 36))
+        let controlReply = try await controlChannel.invoke(
+            selector: "_IDE_initiateControlSessionWithProtocolVersion:",
+            arguments: [protocolVersion]
+        )
+        try checkIOS16Reply(controlReply, operation: "control session")
+
+        let testReply = try await testChannel.invoke(
+            selector: "_IDE_initiateSessionWithIdentifier:forClient:atPath:protocolVersion:",
+            arguments: [sessionUUID as NSUUID, "TouchSynthesis", Bundle.main.bundlePath, protocolVersion]
+        )
+        try checkIOS16Reply(testReply, operation: "test session")
+
+        let authorization = try await controlChannel.invoke(
+            selector: "_IDE_authorizeTestSessionWithProcessID:",
+            arguments: [DTXAuxiliary.ArchivedNumber(value: NSNumber(value: pid))]
+        )
+        guard let reply = authorization,
+              reply.payloadHeader.messageType == .responseWithReturnValue,
+              let accepted = reply.payloadObject as? NSNumber, accepted.boolValue else {
+            throw TestManagerError.authorizationFailed(
+                "iOS 16 declined in-process runner PID \(pid): \(String(describing: authorization?.payloadObject))"
+            )
+        }
+        log("iOS 16: testmanagerd authorized runner PID \(pid)", level: .success)
+    }
+
+    private func checkIOS16Reply(_ reply: DTXMessage?, operation: String) throws {
+        guard let reply, reply.payloadHeader.messageType != .error,
+              !(reply.payloadObject is NSError),
+              (reply.payloadObject as? NSNumber)?.boolValue != false else {
+            throw TestManagerError.sessionRejected(
+                "iOS 16 \(operation): \(String(describing: reply?.payloadObject))"
+            )
+        }
+        log("iOS 16: \(operation) acknowledged", level: .success)
+    }
+
     func initiateControlSession() async throws {
         guard let ch = daemonChannel2 else { throw TestManagerError.notConnected }
 

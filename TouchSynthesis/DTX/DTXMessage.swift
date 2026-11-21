@@ -223,6 +223,8 @@ class DTXMessage {
                 // Some objects may fail secure coding — try insecure
                 let unarchiver = try NSKeyedUnarchiver(forReadingFrom: pData)
                 unarchiver.requiresSecureCoding = false
+                // A daemon reply can contain a class unavailable in the app process.
+                unarchiver.decodingFailurePolicy = .setErrorAndReturn
                 payloadObj = unarchiver.decodeObject(forKey: NSKeyedArchiveRootObjectKey)
                 unarchiver.finishDecoding()
             }

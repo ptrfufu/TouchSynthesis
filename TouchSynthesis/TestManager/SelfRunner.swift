@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Orchestrates the self-runner mode for on-device touch synthesis.
@@ -45,11 +46,15 @@ class SelfRunner {
         try await testManager.connect()
         log("DTX connected", level: .success)
 
-        try await testManager.initiateControlSession()
-        log("Control session initiated", level: .success)
-
-        try await testManager.initiateTestSession()
-        log("Test session initiated", level: .success)
+        if ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 16 {
+            // Confirm the app is authorized before looking up the XCTest runner service.
+            try await testManager.prepareIOS16Session(pid: getpid())
+        } else {
+            try await testManager.initiateControlSession()
+            log("Control session initiated", level: .success)
+            try await testManager.initiateTestSession()
+            log("Test session initiated", level: .success)
+        }
 
         // Step 3: Load XCTest.framework via dlopen.
         let loadError = TouchSynthesizer.loadFramework()
@@ -60,12 +65,15 @@ class SelfRunner {
 
         // Step 4: Initialize the daemon session (XPC to testmanagerd.runner).
         // This call blocks for ~50s on first invocation (XPC handshake).
-        TouchSynthesizer.reinitializeSession()
-        let available = TouchSynthesizer.isDaemonSessionAvailable
-        log("Daemon session available: \(available)", level: available ? .success : .warning)
-
-        // Brief wait for XPC registration to complete
-        try await Task.sleep(nanoseconds: 1_000_000_000)
+        if #available(iOS 26.0, *) {
+            TouchSynthesizer.reinitializeSession()
+            let available = TouchSynthesizer.isDaemonSessionAvailable
+            log("Daemon session available: \(available)", level: available ? .success : .warning)
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+        } else {
+            // Let the framework open its own shared session once, during enable.
+            log("Legacy XCTest startup: opening shared session during enable", level: .info)
+        }
 
         // Step 5: Enable automation mode via XPC.
         // CRITICAL: Only call enableAutomationModeWithError: — nothing else.
@@ -81,6 +89,13 @@ class SelfRunner {
             for line in info.components(separatedBy: "\n") where !line.isEmpty {
                 log("  \(line)", level: .info)
             }
+        }
+        if #unavailable(iOS 26.0) {
+            guard automationResult?.components(separatedBy: "\n").contains("enableAutomationMode: YES") == true else {
+                throw TestManagerError.launchFailed(automationResult ?? "XCTest did not confirm automation mode")
+            }
+            log("Automation mode enabled", level: .success)
+            return
         }
         log("Automation mode enabled", level: .success)
 
