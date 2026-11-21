@@ -1,0 +1,44 @@
+name: Build original iPhone IPA
+
+on:
+  push:
+    branches: [ci/original-ipa]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 688c0f40c270d71166db3fd6858071f09003627d
+          submodules: recursive
+          persist-credentials: false
+      - name: Install XcodeGen and build Rust FFI
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+          bash scripts/build-idevice.sh
+          xcodegen generate
+      - name: Build unsigned iPhone app
+        run: |
+          xcodebuild -project TouchSynthesis.xcodeproj -scheme TouchSynthesis \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO build
+      - name: Package IPA
+        run: |
+          mkdir -p "$RUNNER_TEMP/package/Payload" "$RUNNER_TEMP/artifacts"
+          ditto "$RUNNER_TEMP/derived/Build/Products/Release-iphoneos/TouchSynthesis.app" \
+            "$RUNNER_TEMP/package/Payload/TouchSynthesis.app"
+          cd "$RUNNER_TEMP/package"
+          /usr/bin/zip -qr "$RUNNER_TEMP/artifacts/TouchSynthesis-original-688c0f4-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TouchSynthesis-original-688c0f4-unsigned
+          path: ${{ runner.temp }}/artifacts/*.ipa
+          if-no-files-found: error
+          retention-days: 7
