@@ -25,9 +25,12 @@ jobs:
           xcodegen generate
       - name: Build unsigned iPhone app
         run: |
-          xcodebuild -project TouchSynthesis.xcodeproj -scheme TouchSynthesis \
+          if ! xcodebuild -project TouchSynthesis.xcodeproj -scheme TouchSynthesis \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
-            -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO build
+            -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/xcodebuild.log" 2>&1; then
+            python3 -c 'import sys; from pathlib import Path; lines = Path(sys.argv[1]).read_text(errors="replace").splitlines(); errors = [line.strip() for line in lines if "error:" in line]; print("\n".join("::error::" + line.replace("%", "%25") for line in (errors or lines[-20:])[:20]))' "$RUNNER_TEMP/xcodebuild.log"
+            exit 1
+          fi
       - name: Verify and package IPA
         run: |
           set -euo pipefail
