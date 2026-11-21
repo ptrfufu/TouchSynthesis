@@ -1,3 +1,4 @@
+import Network
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -8,6 +9,7 @@ struct ContentView: View {
     @State private var showFilePicker = false
     @State private var isWorking = false
     @State private var isStopping = false
+    @State private var diagnosticConnection: NWConnection?
 
     // Tunnel
     @State private var ideviceTunnel: IdeviceTunnel?
@@ -36,6 +38,11 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     pairingBar
                     controlSection
+                    Button(diagnosticConnection == nil ? "Probe Lockdown TCP" : "Probing Lockdown TCP…") {
+                        probeLockdownTCP()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(diagnosticConnection != nil || isWorking || isStopping)
                     remoteControlSection
                     interactionSection
                     logSection
@@ -120,7 +127,7 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .tint((automationReady || isStopping) ? .red : .blue)
-            .disabled(pairingRecord == nil || isWorking || isStopping)
+            .disabled(pairingRecord == nil || isWorking || isStopping || diagnosticConnection != nil)
             .modifier(GlassModifier(tintColor: (automationReady || isStopping) ? .red : .blue))
 
             // Status
@@ -423,6 +430,54 @@ struct ContentView: View {
         } catch {
             logger.log("Import failed: \(error.localizedDescription)", phase: "Import", level: .error)
         }
+    }
+
+    // MARK: - Connection diagnostics
+
+    @MainActor
+    private func probeLockdownTCP() {
+        guard diagnosticConnection == nil else { return }
+        let connection = NWConnection(host: "10.7.0.1", port: 62078, using: .tcp)
+        diagnosticConnection = connection
+        logger.log("Probing 10.7.0.1:62078 for up to 20 seconds", phase: "NET")
+
+        connection.stateUpdateHandler = { [weak connection] state in
+            Task { @MainActor in
+                guard let connection, diagnosticConnection === connection else { return }
+                logger.log("State: \(state)", phase: "NET")
+                if let path = connection.currentPath {
+                    logger.log("Path: \(path)", phase: "NET")
+                    if path.status == .unsatisfied {
+                        logger.log("Unsatisfied reason: \(path.unsatisfiedReason)", phase: "NET")
+                    }
+                } else {
+                    logger.log("No current path", phase: "NET")
+                }
+                switch state {
+                case .ready, .failed, .cancelled:
+                    finishLockdownProbe(connection)
+                default:
+                    break
+                }
+            }
+        }
+        connection.start(queue: .main)
+        Task { @MainActor [weak connection] in
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            guard let connection, diagnosticConnection === connection else { return }
+            logger.log("Probe timed out. Final path: \(String(describing: connection.currentPath))", phase: "NET")
+            if let path = connection.currentPath, path.status == .unsatisfied {
+                logger.log("Unsatisfied reason: \(path.unsatisfiedReason)", phase: "NET")
+            }
+            finishLockdownProbe(connection)
+        }
+    }
+
+    @MainActor
+    private func finishLockdownProbe(_ connection: NWConnection) {
+        connection.stateUpdateHandler = nil
+        connection.cancel()
+        diagnosticConnection = nil
     }
 
     // MARK: - Start Everything

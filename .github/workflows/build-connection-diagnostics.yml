@@ -1,0 +1,49 @@
+name: Build TouchSynthesis connection diagnostics IPA
+
+on:
+  push:
+    branches: [ci/connection-diagnostics]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install XcodeGen and build Rust FFI
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+          bash scripts/build-idevice.sh
+          xcodegen generate
+      - name: Build unsigned iPhone app
+        run: |
+          xcodebuild -project TouchSynthesis.xcodeproj -scheme TouchSynthesis \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO build
+      - name: Verify and package IPA
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/derived/Build/Products/Release-iphoneos/TouchSynthesis.app"
+          /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$app/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSBonjourServices:0' "$app/Info.plist")" = '_touchsynth._tcp'
+          /usr/bin/strings "$app/TouchSynthesis" > "$RUNNER_TEMP/app-strings.txt"
+          /usr/bin/grep -F 'Probe Lockdown TCP' "$RUNNER_TEMP/app-strings.txt"
+          mkdir -p "$RUNNER_TEMP/package/Payload" "$RUNNER_TEMP/artifacts"
+          ditto "$app" "$RUNNER_TEMP/package/Payload/TouchSynthesis.app"
+          cd "$RUNNER_TEMP/package"
+          /usr/bin/zip -qr "$RUNNER_TEMP/artifacts/TouchSynthesis-connection-diagnostics-unsigned.ipa" Payload
+          /usr/bin/unzip -tq "$RUNNER_TEMP/artifacts/TouchSynthesis-connection-diagnostics-unsigned.ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TouchSynthesis-connection-diagnostics-unsigned
+          path: ${{ runner.temp }}/artifacts/*.ipa
+          if-no-files-found: error
+          retention-days: 7
