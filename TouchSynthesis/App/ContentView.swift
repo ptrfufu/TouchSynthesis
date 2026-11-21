@@ -493,6 +493,14 @@ struct ContentView: View {
     }
 
     private func startEverything() async {
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        if os.majorVersion == 16 && os.minorVersion == 5 && os.patchVersion == 1 {
+            let message = "Self-runner automation is unavailable on iOS 16.5.1. The XCTest runner connection fails during startup."
+            status = message
+            logger.log(message, phase: "RUNNER", level: .error)
+            return
+        }
+
         isWorking = true
         defer { isWorking = false }
 
