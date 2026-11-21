@@ -4,6 +4,7 @@ import SwiftUI
 struct GestureFixtureApp: App {
     @AppStorage("fixtureTapped") private var tapped = false
     @AppStorage("fixtureSwiped") private var swiped = false
+    @AppStorage("fixtureScreenshotVerified") private var screenshotVerified = false
 
     var body: some Scene {
         WindowGroup {
@@ -26,12 +27,21 @@ struct GestureFixtureApp: App {
                 Text(tapped && swiped ? "点按和滑动通过" : "点按 \(tapped ? "通过" : "待测") · 滑动 \(swiped ? "通过" : "待测")")
                     .foregroundStyle(tapped && swiped ? Color.green : Color.primary)
                     .accessibilityIdentifier(tapped && swiped ? "fixture.passed" : "fixture.pending")
+                if tapped && swiped && screenshotVerified {
+                    Text("PNG 截图通过")
+                        .foregroundStyle(.green)
+                        .accessibilityIdentifier("fixture.screenshot.verified")
+                }
             }
             .padding(24)
             .onAppear {
-                if ProcessInfo.processInfo.arguments.contains("--reset-gesture-result") {
+                let arguments = ProcessInfo.processInfo.arguments
+                if arguments.contains("--reset-gesture-result") {
                     tapped = false
                     swiped = false
+                    screenshotVerified = false
+                } else if arguments.contains("--gesture-screenshot-verified"), tapped && swiped {
+                    screenshotVerified = true
                 }
             }
         }
