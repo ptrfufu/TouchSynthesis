@@ -7,6 +7,15 @@ settings:
     GENERATE_INFOPLIST_FILE: YES
     SWIFT_VERSION: '5.0'
 targets:
+  GestureFixture:
+    type: application
+    platform: iOS
+    sources: [Fixture]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.touchsynthesis.diagnostics.gesturefixture
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        TARGETED_DEVICE_FAMILY: '1'
   XCTestControlUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -18,6 +27,7 @@ schemes:
   XCTestControl:
     build:
       targets:
+        GestureFixture: [test]
         XCTestControlUITests: [test]
     test:
       targets: [XCTestControlUITests]

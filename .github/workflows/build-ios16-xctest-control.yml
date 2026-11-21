@@ -68,6 +68,17 @@ jobs:
               if any(part.endswith('.dSYM') for name in names for part in PurePosixPath(name).parts):
                   raise SystemExit('The IPA contains a dSYM bundle')
           PY
+      - name: Package the gesture fixture
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/derived/Build/Products/Debug-iphoneos/GestureFixture.app"
+          test -f "$fixture/GestureFixture"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$fixture/Info.plist")" = com.touchsynthesis.diagnostics.gesturefixture
+          mkdir -p "$RUNNER_TEMP/fixture/Payload"
+          ditto "$fixture" "$RUNNER_TEMP/fixture/Payload/GestureFixture.app"
+          cd "$RUNNER_TEMP/fixture"
+          /usr/bin/zip -qry "$RUNNER_TEMP/artifacts/GestureFixture-ios16.ipa" Payload
+          /usr/bin/unzip -tq "$RUNNER_TEMP/artifacts/GestureFixture-ios16.ipa"
       - uses: actions/upload-artifact@v4
         with:
           name: XCTestControl-ios16-no-dsym
