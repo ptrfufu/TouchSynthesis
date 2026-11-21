@@ -1,0 +1,49 @@
+name: Build iOS 16 XCTest control
+on:
+  push:
+    branches: [ci/ios16-xctest-control]
+    paths:
+      - 'Diagnostics/XCTestControl/**'
+      - '.github/workflows/build-ios16-xctest-control.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: Diagnostics/XCTestControl
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Build XCTest runner for iPhone
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -project XCTestControl.xcodeproj -scheme XCTestControl \
+            -configuration Debug -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO build-for-testing
+      - name: Verify and package the runner
+        run: |
+          set -euo pipefail
+          runner="$RUNNER_TEMP/derived/Build/Products/Debug-iphoneos/XCTestControlUITests-Runner.app"
+          test -d "$runner/PlugIns/XCTestControlUITests.xctest"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$runner/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$runner/Info.plist"
+          mkdir -p "$RUNNER_TEMP/package/Payload" "$RUNNER_TEMP/artifacts"
+          ditto "$runner" "$RUNNER_TEMP/package/Payload/XCTestControlUITests-Runner.app"
+          cd "$RUNNER_TEMP/package"
+          /usr/bin/zip -qry "$RUNNER_TEMP/artifacts/XCTestControl-unsigned.ipa" Payload
+          /usr/bin/unzip -tq "$RUNNER_TEMP/artifacts/XCTestControl-unsigned.ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XCTestControl-unsigned
+          path: ${{ runner.temp }}/artifacts/*.ipa
+          if-no-files-found: error
+          retention-days: 7

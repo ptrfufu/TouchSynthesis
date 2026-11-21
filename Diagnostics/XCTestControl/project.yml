@@ -1,0 +1,23 @@
+name: XCTestControl
+options:
+  deploymentTarget:
+    iOS: '16.0'
+settings:
+  base:
+    GENERATE_INFOPLIST_FILE: YES
+    SWIFT_VERSION: '5.0'
+targets:
+  XCTestControlUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tests]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.touchsynthesis.diagnostics.xctestcontrol
+schemes:
+  XCTestControl:
+    build:
+      targets:
+        XCTestControlUITests: [test]
+    test:
+      targets: [XCTestControlUITests]
