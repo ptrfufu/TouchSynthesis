@@ -868,10 +868,29 @@ static void _installGlobalExceptionHandler(void) {
 + (void)_synthesizeEvent:(id)record completion:(void (^)(NSString *_Nullable))completion {
     _installNonFatalAssertionHandler();
 
-    // Path 1: record.synthesizeWithError: — synchronous, may bypass daemon
+    BOOL legacy = NSProcessInfo.processInfo.operatingSystemVersion.majorVersion == 16;
+    if (legacy) {
+        void (^reply)(NSString *) = [completion copy];
+        __block BOOL finished = NO;
+        completion = ^(NSString *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (finished) return;
+                finished = YES;
+                reply(error);
+            });
+        };
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC),
+                       dispatch_get_main_queue(), ^{
+            if (finished) return;
+            finished = YES;
+            reply(@"XCTest gesture completion timed out");
+        });
+    }
+
+    // The synchronous path reported success without visible input on iOS 16.5.1.
     @try {
         SEL synthSel = @selector(synthesizeWithError:);
-        if ([record respondsToSelector:synthSel]) {
+        if (!legacy && [record respondsToSelector:synthSel]) {
             NSError *error = nil;
             typedef BOOL (*MsgSend_BOOL_err)(id, SEL, NSError **);
             BOOL result = ((MsgSend_BOOL_err)objc_msgSend)(record, synthSel, &error);
@@ -923,7 +942,7 @@ static void _installGlobalExceptionHandler(void) {
         }
     }
 
-    // Path 3: daemonProxy — fire-and-forget (5s quiescence unavoidable)
+    // Path 3: daemonProxy. Keep the immediate reply on newer iOS.
     if (cls_XCTRunnerDaemonSession) {
         @try {
             id session = [cls_XCTRunnerDaemonSession performSelector:@selector(sharedSession)];
@@ -935,14 +954,21 @@ static void _installGlobalExceptionHandler(void) {
                 if (proxy) {
                     SEL xctSel = @selector(_XCT_synthesizeEvent:completion:);
                     if ([proxy respondsToSelector:xctSel]) {
-                        // Fire-and-forget: send event, don't wait for completion
+                        // iOS 16 also needs the result returned by XCTest.
                         ((MsgSend_void_id_id)objc_msgSend)(
                             proxy, xctSel, record,
                             ^(NSError *error) {
-                                sLastPathUsed = @"daemonProxy";
+                                if (legacy) {
+                                    dispatch_async(dispatch_get_main_queue(), ^{
+                                        sLastPathUsed = @"daemonProxy";
+                                        completion(error.localizedDescription);
+                                    });
+                                } else {
+                                    sLastPathUsed = @"daemonProxy";
+                                }
                             }
                         );
-                        completion(nil); // Return immediately
+                        if (!legacy) completion(nil);
                         return;
                     }
                 }
@@ -952,10 +978,17 @@ static void _installGlobalExceptionHandler(void) {
                     ((MsgSend_void_id_id)objc_msgSend)(
                         session, @selector(synthesizeEvent:completion:), record,
                         ^(NSError *error) {
-                            sLastPathUsed = @"session";
+                            if (legacy) {
+                                dispatch_async(dispatch_get_main_queue(), ^{
+                                    sLastPathUsed = @"session";
+                                    completion(error.localizedDescription);
+                                });
+                            } else {
+                                sLastPathUsed = @"session";
+                            }
                         }
                     );
-                    completion(nil);
+                    if (!legacy) completion(nil);
                     return;
                 }
             }

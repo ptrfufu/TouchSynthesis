@@ -150,8 +150,7 @@ class CommandServer: ObservableObject {
         // Fire-and-forget: respond immediately, run synthesis in background
         case "tap":
             let point = pointFrom(cmd.params, xKey: "x", yKey: "y")
-            fireAndForget(id: cmd.id) { TouchSynthesizer.tap(at: point, completion: $0) }
-            return CommandResponse(id: cmd.id, success: true)
+            return await gestureResponse(id: cmd.id) { TouchSynthesizer.tap(at: point, completion: $0) }
 
         case "longPress":
             let point = pointFrom(cmd.params, xKey: "x", yKey: "y")
@@ -163,8 +162,7 @@ class CommandServer: ObservableObject {
             let from = pointFrom(cmd.params, xKey: "fromX", yKey: "fromY")
             let to = pointFrom(cmd.params, xKey: "toX", yKey: "toY")
             let duration = cmd.params?["duration"]?.doubleValue ?? 0.5
-            fireAndForget(id: cmd.id) { TouchSynthesizer.swipe(from: from, to: to, duration: duration, completion: $0) }
-            return CommandResponse(id: cmd.id, success: true)
+            return await gestureResponse(id: cmd.id) { TouchSynthesizer.swipe(from: from, to: to, duration: duration, completion: $0) }
 
         case "pinch":
             let center = pointFrom(cmd.params, xKey: "centerX", yKey: "centerY")
@@ -509,6 +507,20 @@ class CommandServer: ObservableObject {
     // MARK: - Helpers
 
     /// Fire-and-forget: runs the synthesis block in the background, logs errors but doesn't block the caller.
+    private func gestureResponse(id: String, _ synthesize: @escaping (@escaping (String?) -> Void) -> Void) async -> CommandResponse {
+        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 16 else {
+            fireAndForget(id: id, synthesize)
+            return CommandResponse(id: id, success: true)
+        }
+        let error: String? = await withCheckedContinuation { continuation in
+            synthesize { continuation.resume(returning: $0) }
+        }
+        if let error {
+            logger.log("Synthesis error (\(id)): \(error)", phase: "REMOTE", level: .error)
+        }
+        return CommandResponse(id: id, success: error == nil, error: error)
+    }
+
     private func fireAndForget(id: String, _ block: @escaping (@escaping (String?) -> Void) -> Void) {
         let logger = self.logger
         block { error in
