@@ -917,6 +917,24 @@ static void _installGlobalExceptionHandler(void) {
                     if (synthesizer) {
                         SEL synthSel = @selector(synthesizeEvent:completion:);
                         if ([synthesizer respondsToSelector:synthSel]) {
+                            if (legacy) {
+                                // iOS 16 passes a scalar result before the NSError.
+                                ((MsgSend_void_id_id)objc_msgSend)(
+                                    synthesizer, synthSel, record,
+                                    ^(BOOL success, NSError *error) {
+                                        NSString *failure = error.localizedDescription;
+                                        if (!success && !failure) {
+                                            failure = @"XCTest rejected the gesture without an error description";
+                                        }
+                                        NSLog(@"[TouchSynthesizer] iOS 16 gesture reply: success=%d error=%@",
+                                              success, failure);
+                                        dispatch_async(dispatch_get_main_queue(), ^{
+                                            sLastPathUsed = @"eventSynthesizer";
+                                            completion(failure);
+                                        });
+                                    });
+                                return;
+                            }
                             CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
                             ((MsgSend_void_id_id)objc_msgSend)(
                                 synthesizer, synthSel, record,
@@ -942,6 +960,11 @@ static void _installGlobalExceptionHandler(void) {
         }
     }
 
+    if (legacy) {
+        completion(@"iOS 16 XCTest event synthesizer is unavailable");
+        return;
+    }
+
     // Path 3: daemonProxy. Keep the immediate reply on newer iOS.
     if (cls_XCTRunnerDaemonSession) {
         @try {
@@ -954,21 +977,13 @@ static void _installGlobalExceptionHandler(void) {
                 if (proxy) {
                     SEL xctSel = @selector(_XCT_synthesizeEvent:completion:);
                     if ([proxy respondsToSelector:xctSel]) {
-                        // iOS 16 also needs the result returned by XCTest.
                         ((MsgSend_void_id_id)objc_msgSend)(
                             proxy, xctSel, record,
                             ^(NSError *error) {
-                                if (legacy) {
-                                    dispatch_async(dispatch_get_main_queue(), ^{
-                                        sLastPathUsed = @"daemonProxy";
-                                        completion(error.localizedDescription);
-                                    });
-                                } else {
-                                    sLastPathUsed = @"daemonProxy";
-                                }
+                                sLastPathUsed = @"daemonProxy";
                             }
                         );
-                        if (!legacy) completion(nil);
+                        completion(nil);
                         return;
                     }
                 }
@@ -978,17 +993,10 @@ static void _installGlobalExceptionHandler(void) {
                     ((MsgSend_void_id_id)objc_msgSend)(
                         session, @selector(synthesizeEvent:completion:), record,
                         ^(NSError *error) {
-                            if (legacy) {
-                                dispatch_async(dispatch_get_main_queue(), ^{
-                                    sLastPathUsed = @"session";
-                                    completion(error.localizedDescription);
-                                });
-                            } else {
-                                sLastPathUsed = @"session";
-                            }
+                            sLastPathUsed = @"session";
                         }
                     );
-                    if (!legacy) completion(nil);
+                    completion(nil);
                     return;
                 }
             }
