@@ -74,6 +74,18 @@ class DTXConnection {
             try setupTLS()
         }
 
+        if ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 16 {
+            // Keep the connected test manager channels alive while idle.
+            // DTX requests have their own reply deadline in sendAndWaitForReply.
+            var noReadTimeout = timeval(tv_sec: 0, tv_usec: 0)
+            guard setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &noReadTimeout,
+                             socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+                let error = errno
+                close()
+                throw DTXError.sendFailed("Disabling DTX idle receive timeout failed: errno=\(error)")
+            }
+        }
+
         isConnected = true
         startReadLoop()
     }
@@ -82,8 +94,14 @@ class DTXConnection {
         readTask?.cancel()
         readTask = nil
 
+        if socketFD >= 0 {
+            // Wake the blocking reader before tearing down its TLS socket.
+            _ = Darwin.shutdown(socketFD, SHUT_RDWR)
+        }
         if let ctx = sslContext {
-            SSLClose(ctx)
+            if ProcessInfo.processInfo.operatingSystemVersion.majorVersion != 16 {
+                SSLClose(ctx)
+            }
             sslContext = nil
         }
         if socketFD >= 0 {
