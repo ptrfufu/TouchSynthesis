@@ -262,7 +262,61 @@ static int sGlobalHeartbeatToken = 0;
 
 // MARK: - Screenshot
 
+- (nullable NSData *)_takeLegacyScreenshotAndReturnError:(NSString *_Nullable *_Nullable)outError {
+    NSString *pairingPath = _savedPairingPath;
+    NSString *deviceIP = _savedDeviceIP;
+    uint16_t port = _savedPort;
+    if (!_connected || !pairingPath || !deviceIP) {
+        if (outError) *outError = @"Not connected — call connect first";
+        return nil;
+    }
+
+    struct sockaddr_in address = {0};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    if (inet_pton(AF_INET, deviceIP.UTF8String, &address.sin_addr) != 1) {
+        if (outError) *outError = @"Invalid device IP address";
+        return nil;
+    }
+
+    const char *stage = "Pairing read";
+    struct IdevicePairingFile *pairing = NULL;
+    struct IdeviceProviderHandle *provider = NULL;
+    struct ScreenshotrClientHandle *client = NULL;
+    struct ScreenshotData screenshot = {0};
+    IdeviceFfiError *error = idevice_pairing_file_read(pairingPath.UTF8String, &pairing);
+    if (!error) {
+        stage = "Screenshot provider";
+        error = idevice_tcp_provider_new((struct sockaddr *)&address, pairing, "TouchSynthesis-Screenshot", &provider);
+    }
+    if (!error) {
+        stage = "screenshotr connect";
+        error = screenshotr_connect(provider, &client);
+    }
+    if (!error) {
+        stage = "screenshotr capture";
+        error = screenshotr_take_screenshot(client, &screenshot);
+    }
+
+    NSData *image = nil;
+    if (error) {
+        if (outError) *outError = [NSString stringWithFormat:@"%s: %s", stage, error->message];
+        idevice_error_free(error);
+    } else if (screenshot.data && screenshot.length) {
+        image = [NSData dataWithBytes:screenshot.data length:screenshot.length];
+    } else if (outError) {
+        *outError = @"screenshotr returned empty data";
+    }
+    screenshotr_screenshot_free(screenshot);
+    screenshotr_client_free(client);
+    if (provider) idevice_provider_free(provider);
+    return image;
+}
+
 - (nullable NSData *)takeScreenshotAndReturnError:(NSString *_Nullable *_Nullable)outError {
+    if (NSProcessInfo.processInfo.operatingSystemVersion.majorVersion < 17) {
+        return [self _takeLegacyScreenshotAndReturnError:outError];
+    }
     struct AdapterHandle *adapter = NULL;
     struct RsdHandshakeHandle *handshake = NULL;
     NSString *tunnelErr = [self _freshTunnelWithAdapter:&adapter handshake:&handshake];
