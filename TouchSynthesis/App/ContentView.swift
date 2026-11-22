@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import Network
 
 struct ContentView: View {
     @StateObject private var logger = ProtocolLogger()
@@ -8,6 +9,8 @@ struct ContentView: View {
     @State private var showFilePicker = false
     @State private var isWorking = false
     @State private var isStopping = false
+    @State private var isProbingTCP = false
+    @State private var diagnosticConnection: NWConnection?
 
     // Tunnel
     @State private var ideviceTunnel: IdeviceTunnel?
@@ -62,6 +65,59 @@ struct ContentView: View {
             handleFileImport(result)
         }
         .onAppear { loadSavedPairing() }
+    }
+
+    @MainActor
+    private func compareLockdownTCP() async {
+        guard let record = pairingRecord, !isProbingTCP, !isWorking, !automationReady else { return }
+        isProbingTCP = true
+        logger.log("Comparing BSD and Network.framework TCP to 10.7.0.1:62078", phase: "NET")
+
+        let bsdResult = await Task.detached(priority: .userInitiated) {
+            let client = LockdownClient(pairingRecord: record)
+            defer { client.disconnect() }
+            do {
+                try client.connect()
+                return "BSD connected"
+            } catch {
+                return "BSD failed: \(error.localizedDescription)"
+            }
+        }.value
+        logger.log(bsdResult, phase: "NET")
+
+        let connection = NWConnection(host: "10.7.0.1", port: 62078, using: .tcp)
+        diagnosticConnection = connection
+        connection.stateUpdateHandler = { [weak connection] state in
+            Task { @MainActor in
+                guard let connection, diagnosticConnection === connection else { return }
+                switch state {
+                case .ready, .failed, .cancelled:
+                    finishLockdownProbe(connection, result: "\(state)")
+                case .waiting:
+                    logger.log("NWConnection \(state), path: \(String(describing: connection.currentPath))", phase: "NET")
+                default:
+                    break
+                }
+            }
+        }
+        connection.start(queue: .main)
+        Task { @MainActor [weak connection] in
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            guard let connection, diagnosticConnection === connection else { return }
+            finishLockdownProbe(connection, result: "timed out")
+        }
+    }
+
+    @MainActor
+    private func finishLockdownProbe(_ connection: NWConnection, result: String) {
+        logger.log("NWConnection \(result), path: \(String(describing: connection.currentPath))", phase: "NET")
+        if let path = connection.currentPath, path.status == .unsatisfied {
+            logger.log("Unsatisfied reason: \(path.unsatisfiedReason)", phase: "NET")
+        }
+        connection.stateUpdateHandler = nil
+        diagnosticConnection = nil
+        connection.cancel()
+        isProbingTCP = false
     }
 
     // MARK: - Pairing Bar
@@ -120,8 +176,14 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .tint((automationReady || isStopping) ? .red : .blue)
-            .disabled(pairingRecord == nil || isWorking || isStopping)
+            .disabled(pairingRecord == nil || isWorking || isStopping || isProbingTCP)
             .modifier(GlassModifier(tintColor: (automationReady || isStopping) ? .red : .blue))
+
+            Button("Compare Lockdown TCP") {
+                Task { await compareLockdownTCP() }
+            }
+            .buttonStyle(.bordered)
+            .disabled(pairingRecord == nil || isWorking || isStopping || automationReady || isProbingTCP)
 
             // Status
             if !status.isEmpty {
