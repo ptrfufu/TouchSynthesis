@@ -34,9 +34,17 @@ class SelfRunner {
 
         // Step 1: Set XCTest env vars BEFORE anything else.
         let sessionID = testManager.sessionUUID.uuidString.uppercased()
+        let isIOS16 = ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 16
         setenv("XCTestSessionIdentifier", sessionID, 1)
-        setenv("XCTestManagerVariant", "DDI", 1)
-        setenv("XCTestConfigurationFilePath", "", 1)
+        if isIOS16 {
+            // The iOS 16 device test launcher leaves the manager variant unset.
+            unsetenv("XCTestManagerVariant")
+            unsetenv("XCTestConfigurationFilePath")
+            log("iOS 16: using XCTest default manager variant", level: .info)
+        } else {
+            setenv("XCTestManagerVariant", "DDI", 1)
+            setenv("XCTestConfigurationFilePath", "", 1)
+        }
         setenv("NSUnbufferedIO", "YES", 1)
         setenv("OS_ACTIVITY_DT_MODE", "YES", 1)
         log("Set XCTestSessionIdentifier: \(sessionID)", level: .info)
@@ -46,7 +54,7 @@ class SelfRunner {
         try await testManager.connect()
         log("DTX connected", level: .success)
 
-        if ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 16 {
+        if isIOS16 {
             // Confirm the app is authorized before looking up the XCTest runner service.
             try await testManager.prepareIOS16Session(pid: getpid())
         } else {
